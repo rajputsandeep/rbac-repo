@@ -21,14 +21,20 @@ app.use(express.urlencoded({ extended: false }));
 // ✅ Allow frontend (cookies + auth headers)
 app.use(
   cors({
-    origin: "http://localhost:3000", //
-    credentials: true,               // ✅ cookies + Authorization header allow
+    origin: "http://localhost:3000", // 👈 apna frontend origin
+    credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-   allowedHeaders: "*",
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "x-api-key",
+      "X-Tenant-Id"   
+    ],
+    exposedHeaders: ["Authorization", "X-Tenant-Id"],
   })
 );
 
-// ✅ Preflight requests (for OPTIONS)
 app.options("*", cors());
 
 const limiter = rateLimit({

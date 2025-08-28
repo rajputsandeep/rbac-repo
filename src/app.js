@@ -5,50 +5,54 @@ import morgan from 'morgan';
 
 import authRoutes from './routes/auth.js';
 import meRoutes from './routes/me.js';
-import registerRoutes from "./routes/register.js"
+import registerRoutes from "./routes/register.js";
 import { requireAuth } from './middleware/auth.js';
 import { allowRoles } from './middleware/roleGuard.js';
 
-//rate limiting
 import rateLimit from 'express-rate-limit';
+
 const app = express();
 
 app.use(helmet());
 app.use(express.json());
 app.use(morgan('dev'));
-
 app.use(express.urlencoded({ extended: false }));
 
+// ✅ Allow frontend (cookies + auth headers)
 app.use(
   cors({
-    origin: "*", 
+    origin: "http://localhost:3000", //
+    credentials: true,               // ✅ cookies + Authorization header allow
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "x-api-key"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "x-api-key",
+    ],
   })
 );
 
-// Preflight requests (OPTIONS)
+// ✅ Preflight requests (for OPTIONS)
 app.options("*", cors());
 
 const limiter = rateLimit({
-windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),
-max: Number(process.env.RATE_LIMIT_MAX || 100),
-standardHeaders: true,
-legacyHeaders: false,
+  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),
+  max: Number(process.env.RATE_LIMIT_MAX || 100),
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use(limiter);
 
 // Health
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
-// Auth
+// Routes
 app.use('/auth', authRoutes);
-//register auth
 app.use("/register", registerRoutes);
-// Me
 app.use('/', meRoutes);
 
-// Example protected route with role guard scaffolding
+// Example protected route
 app.get('/admin/ping', requireAuth, allowRoles('Admin'), (req, res) => {
   res.json({ ok: true, msg: 'admin pong', tenantId: req.user.tenantId });
 });

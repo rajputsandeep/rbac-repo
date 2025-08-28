@@ -18,7 +18,15 @@ app.use(express.json());
 app.use(morgan('dev'));
 
 app.use(express.urlencoded({ extended: false }));
-app.use(cors({ origin: process.env.CORS_ORIGIN, credentials: true }));
+
+app.use(
+  cors({
+    origin: "*", 
+    credentials: true,         
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "x-api-key"],
+  })
+);
 
 const limiter = rateLimit({
 windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),

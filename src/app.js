@@ -22,11 +22,13 @@ app.use(express.urlencoded({ extended: false }));
 app.use(
   cors({
     origin: "*", 
-    credentials: true,         
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "x-api-key"],
   })
 );
+
+// Preflight requests (OPTIONS)
+app.options("*", cors());
 
 const limiter = rateLimit({
 windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),

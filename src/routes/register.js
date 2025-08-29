@@ -30,11 +30,6 @@ async function findUserByEmailAndTenant(email, tenantIdNullable) {
   return qb.getOne();
 }
 
-/** ======================
- * 1) SUPERADMIN → Create Tenant + TenantUser (bound)
- * ====================== */
-
-// src/routes/register.js (add at bottom or separate file)
 router.post(
   "/superadmin",
   async (req, res) => {
@@ -182,159 +177,60 @@ router.post(
   }
 );
 
-/** ======================
- * 2) TENANT → Create Admin (within tenant)
- *    (अगर tenant का खुद का tenant NULL है, to body.tenantId चाहिए)
- * ====================== */
-router.post(
-  "/admin",
-  requireAuth,
-  allowRoles("tenant"),
-  async (req, res) => {
-    try {
-      const { email, password, userName, tenantId } = req.body || {};
-      if (!email || !password || !userName) {
-        return res.status(400).json({ error: "email, password, userName are required" });
-      }
 
-      // resolve target tenant: prefer body.tenantId, else caller's token
-      const effectiveTenantId = tenantId ?? req.user.tenantId ?? null;
-      if (!effectiveTenantId) {
-        return res.status(400).json({ error: "tenantId is required (caller has no tenant bound)" });
-      }
 
-      const tenant = await TenantRepo().findOne({ where: { id: effectiveTenantId } });
-      if (!tenant) return res.status(404).json({ error: "Tenant not found" });
-
-      const dup = await findUserByEmailAndTenant(email, effectiveTenantId);
-      if (dup) return res.status(400).json({ error: "Email already used in this tenant" });
-
-      const roleAdmin = await getRoleOrThrow("admin");
-
-      const adminUser = UserRepo().create({
-        userId: `u-${effectiveTenantId}-admin-${Date.now()}`,
-        password,
-        userName,
-        contactDetails: "",
-        contactEmail: email,
-        creationDate: new Date(),
-        createdBy: req.user.userId,
-        enabled: true,
-        email,
-        role: "Admin",
-        roleRef: roleAdmin,
-        tenant      // must be bound for admin
-      });
-
-      await UserRepo().save(adminUser);
-
-      return res.json({
-        msg: "Admin user created",
-        user: {
-          userId: adminUser.userId,
-          email: adminUser.email,
-          role: adminUser.role,
-          tenantId: tenant.id,
-          enabled: adminUser.enabled,
-          userName: adminUser.userName,
-          creationDate: adminUser.creationDate
-        }
-      });
-    } catch (err) {
-      console.error(err);
-      return res.status(500).json({ error: String(err.message || err) });
-    }
-  }
-);
-
-/** ======================
- * 3) MULTI-ROLE USER CREATE (updated)
- *    superAdmin | tenant | Admin - sab yahi use karein
- *    Rules:
- *      - superAdmin can create:
- *          - superadmin/tenant with optional tenantId (NULL if missing)
- *          - admin/agent/auditor/reviewer → tenant required (body.tenantId)
- *      - tenant can create:
- *          - admin → tenant required (body.tenantId or caller.tenantId)
- *          - agent/auditor/reviewer → optionally allow? (default: NO; keep admin-only)
- *      - Admin can create:
- *          - agent/auditor/reviewer within own tenant (tenant resolved)
- * ====================== */
 router.post(
   "/user",
   requireAuth,
-  allowRoles("superAdmin", "tenant", "Admin"),
+  allowRoles("tenant", "Admin"),
   async (req, res) => {
     try {
-      const { email, password, userName, role, tenantId } = req.body || {};
+      const { email, password, userName, role } = req.body || {};
       if (!email || !password || !userName || !role) {
-        return res.status(400).json({ error: "email, password, userName, role are required" });
+        return res.status(400).json({ error: "email, password, userName, roles are required" });
       }
 
       const callerRole = (req.user.role || "").toLowerCase();
       const newRole = String(role).toLowerCase();
 
-      // Validate who can create what
-      const isSuper = callerRole === "superadmin";
-      const isTenant = callerRole === "tenant";
-      const isAdmin = callerRole === "admin";
+      const isTenant = callerRole === "tanent" || callerRole === "tenant";
+      const isAdmin  = callerRole === "admin";
 
-      const allowedForAdmin = ["agent", "auditor", "reviewer"];
-      const allowedForTenant = ["admin"]; // keep strict; can expand if needed
-      const allowedForSuper = ["superadmin", "tenant", "admin", "agent", "auditor", "reviewer"];
+      // ✅ Allowed create sets
+      const allowedForTenant = ["admin", "agent", "auditor", "reviewer"];
+      const allowedForAdmin  = ["agent", "auditor", "reviewer"];
 
-      if (isAdmin && !allowedForAdmin.includes(newRole)) {
-        return res.status(403).json({ error: "Admin can only create agent/auditor/reviewer" });
-      }
       if (isTenant && !allowedForTenant.includes(newRole)) {
-        return res.status(403).json({ error: "Tenant user can only create admin" });
+        return res.status(403).json({ error: "Tenant can create only admin/agent/auditor/reviewer" });
       }
-      if (isSuper && !allowedForSuper.includes(newRole)) {
-        return res.status(403).json({ error: "Not allowed role" });
-      }
-
-      // Determine effective tenant binding for new user:
-      let effectiveTenant = null;      // object
-      let effectiveTenantId = tenantId ?? null;
-
-      // Cases:
-      // - New role = superadmin | tenant: tenant optional
-      // - New role = admin/agent/auditor/reviewer: tenant required
-      const roleNeedsTenant = !["superadmin", "tenant"].includes(newRole);
-
-      if (roleNeedsTenant) {
-        // If caller is Admin: force to caller's tenant
-        if (isAdmin) {
-          effectiveTenantId = req.user.tenantId ?? null;
-        }
-        // If caller is tenant and has tenant bound, prefer caller's tenant when not provided
-        if (isTenant && !effectiveTenantId) {
-          effectiveTenantId = req.user.tenantId ?? null;
-        }
-        if (!effectiveTenantId) {
-          return res.status(400).json({ error: "tenantId is required for this role" });
-        }
-        effectiveTenant = await TenantRepo().findOne({ where: { id: effectiveTenantId } });
-        if (!effectiveTenant) return res.status(404).json({ error: "Tenant not found" });
-      } else {
-        // optional tenant for superadmin/tenant
-        if (effectiveTenantId) {
-          effectiveTenant = await TenantRepo().findOne({ where: { id: effectiveTenantId } });
-          if (!effectiveTenant) return res.status(404).json({ error: "Tenant not found" });
-        } else {
-          effectiveTenant = null; // keep null
-        }
+      if (isAdmin && !allowedForAdmin.includes(newRole)) {
+        return res.status(403).json({ error: "Admin can create only agent/auditor/reviewer" });
       }
 
-      // Uniqueness check (per-tenant or global-null)
-      const dup = await findUserByEmailAndTenant(email, effectiveTenant ? effectiveTenant.id : null);
+      // ❌ Block creating superadmin/tenant users from this endpoint
+      if (["superadmin", "tenant", "tanent"].includes(newRole)) {
+        return res.status(403).json({ error: "Cannot create superadmin/tenant users here" });
+      }
+
+      // 🔐 Always bind to caller's tenant
+      const effectiveTenantId = req.user.tenantId || null;
+      if (!effectiveTenantId) {
+        return res.status(400).json({ error: "Caller must be bound to a tenant" });
+      }
+
+      const effectiveTenant = await TenantRepo().findOne({ where: { id: effectiveTenantId } });
+      if (!effectiveTenant) return res.status(404).json({ error: "Tenant not found" });
+
+      // Uniqueness within the tenant
+      const dup = await findUserByEmailAndTenant(email, effectiveTenant.id);
       if (dup) {
-        return res.status(400).json({ error: "Email already used for this tenant scope" });
+        return res.status(400).json({ error: "Email already used in this tenant" });
       }
 
       const roleRef = await getRoleOrThrow(newRole);
+
       const newUser = UserRepo().create({
-        userId: `u-${effectiveTenant ? effectiveTenant.id : "global"}-${newRole}-${Date.now()}`,
+        userId: `u-${effectiveTenant.id}-${newRole}-${Date.now()}`,
         password,
         userName,
         contactDetails: "",
@@ -343,9 +239,9 @@ router.post(
         createdBy: req.user.userId,
         enabled: true,
         email,
-        role: newRole.charAt(0).toUpperCase() + newRole.slice(1),
+        role: newRole.charAt(0).toUpperCase() + newRole.slice(1), // "Admin"/"Agent"/...
         roleRef,
-        tenant: effectiveTenant // may be null for superadmin/tenant
+        tenant: effectiveTenant
       });
 
       await UserRepo().save(newUser);
@@ -356,7 +252,7 @@ router.post(
           userId: newUser.userId,
           email: newUser.email,
           role: newUser.role,
-          tenantId: effectiveTenant ? effectiveTenant.id : null,
+          tenantId: effectiveTenant.id,
           enabled: newUser.enabled,
           userName: newUser.userName,
           creationDate: newUser.creationDate
@@ -368,5 +264,6 @@ router.post(
     }
   }
 );
+
 
 export default router;

@@ -21,7 +21,7 @@ app.use(express.urlencoded({ extended: false }));
 // ✅ Allow frontend (cookies + auth headers)
 app.use(
   cors({
-    origin: "http://localhost:3000", // 👈 apna frontend origin
+    origin: "https://synthora-dev.netlify.app/", 
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
